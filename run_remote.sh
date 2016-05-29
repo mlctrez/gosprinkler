@@ -4,8 +4,11 @@
 
 set -e
 
+REMOTE=bb1
+
+
 GOOS=linux GOARM=7 GOARCH=arm go build -o /tmp/sprinkler sprinkler.go
 
-scp /tmp/sprinkler root@bb2:/root/sprinkler
+scp /tmp/sprinkler root@$REMOTE:/root/sprinkler
 
-ssh root@bb2 /root/sprinkler
+ssh root@$REMOTE /root/sprinkler
