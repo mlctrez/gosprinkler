@@ -1,2 +1,3 @@
 # gosprinkler
-golang running on beaglebone powered by resin.io
+
+A beaglebone black sprinkler controller running golang
