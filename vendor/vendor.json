@@ -1,0 +1,13 @@
+{
+	"comment": "",
+	"ignore": "test",
+	"package": [
+		{
+			"checksumSHA1": "cRzgPr7oMdzIVpkFr7bf0PAOP2w=",
+			"path": "github.com/mrmorphic/hwio",
+			"revision": "4af3c0a919085ce9b99bbe5a8e3334b805618c2e",
+			"revisionTime": "2016-01-09T08:46:21Z"
+		}
+	],
+	"rootPath": "github.com/mlctrez/gosprinkler"
+}
