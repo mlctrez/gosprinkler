@@ -1,0 +1,2 @@
+# this is a sprinkler process, if it is not already obvious
+0 1 * * * root /root/sprinkler >> /root/sprinkler.log 2>&1

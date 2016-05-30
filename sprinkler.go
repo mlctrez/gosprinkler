@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"github.com/mrmorphic/hwio"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 )
 
 func initializePins() (pins []hwio.Pin, err error) {
@@ -34,36 +38,62 @@ func initializePins() (pins []hwio.Pin, err error) {
 
 }
 
+func shutdown() {
+
+	fmt.Println("shutting down all zones")
+
+	// force all zones low to minimize water bill
+	initializePins()
+
+	// close, per the hwio documentation
+	hwio.CloseAll()
+}
+
 func main() {
 
-	// force beaglebone driver since hwio.MatchesHardwareConfig for the beaglebone driver
-	// fails to detect the driver.
+	// for driver and zone cleanup
+	defer shutdown()
+
+	// handle signals and shut down the zones correctly
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
+	go func() {
+		<-c
+		shutdown()
+		os.Exit(1)
+	}()
+
+	// Force the beaglebone driver since MatchesHardwareConfig looks in the wrong location for my distribution.
+	// At some point a pull request should be submitted to address this.
 	hwio.SetDriver(new(hwio.BeagleBoneBlackDriver))
-
-	// for cleanup
-	defer initializePins()
-
-	defer hwio.CloseAll()
 
 	pins, err := initializePins()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	_ = pins
+	defaultDuration := 30 * time.Minute
+	zoneFiveDuration := 15 * time.Minute
 
-	//time.Sleep(5 * time.Second)
-	//
-	//fmt.Println("turning on zone 0")
-	//
-	//hwio.DigitalWrite(pins[0], hwio.HIGH)
-	//
-	//time.Sleep(120 * time.Second)
-	//
-	//fmt.Println("turning off zone 0")
-	//
-	//hwio.DigitalWrite(pins[0], hwio.LOW)
+	for zone, pin := range pins {
 
-	hwio.DebugPinMap()
+		fmt.Printf("turning on zone %v\n", zone)
+
+		hwio.DigitalWrite(pin, hwio.HIGH)
+
+		switch zone {
+		case 5:
+			time.Sleep(zoneFiveDuration)
+		default:
+			time.Sleep(defaultDuration)
+		}
+
+		fmt.Printf("turning off zone %v\n", zone)
+
+		hwio.DigitalWrite(pin, hwio.LOW)
+
+		// pause between zones to allow the sprinkler heads to retract
+		time.Sleep(30 * time.Second)
+	}
 
 }
