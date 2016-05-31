@@ -6,6 +6,8 @@ set -e
 
 REMOTE=bb1
 
+rm -f /tmp/sprinkler
+
 # cross compiling for BBB requires GOXX in the line below
 GOOS=linux GOARM=7 GOARCH=arm go build -o /tmp/sprinkler sprinkler.go
 

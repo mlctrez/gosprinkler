@@ -1,9 +1,8 @@
 package main
 
 import (
-	"fmt"
-	"github.com/mrmorphic/hwio"
-	"log"
+	"github.com/mlctrez/hwio"
+	log "github.com/Sirupsen/logrus"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,7 +11,7 @@ import (
 
 func initializePins() (pins []hwio.Pin, err error) {
 
-	fmt.Println("initializePins")
+	log.Println("initializePins")
 
 	pinNames := []string{"P8.8", "P8.10", "P8.12", "P8.14", "P8.16", "P8.18"}
 
@@ -34,13 +33,13 @@ func initializePins() (pins []hwio.Pin, err error) {
 
 	}
 
-	return pins, nil
+	return pins, err
 
 }
 
 func shutdown() {
 
-	fmt.Println("shutting down all zones")
+	log.Println("shutting down all zones")
 
 	// force all zones low to minimize water bill
 	initializePins()
@@ -53,6 +52,12 @@ func main() {
 
 	// for driver and zone cleanup
 	defer shutdown()
+
+	if len(os.Args)==2 {
+		if os.Args[1] == "stop" {
+			return
+		}
+	}
 
 	// handle signals and shut down the zones correctly
 	c := make(chan os.Signal, 1)
@@ -77,7 +82,7 @@ func main() {
 
 	for zone, pin := range pins {
 
-		fmt.Printf("turning on zone %v\n", zone)
+		log.Printf("turning on zone %v\n", zone)
 
 		hwio.DigitalWrite(pin, hwio.HIGH)
 
@@ -88,7 +93,7 @@ func main() {
 			time.Sleep(defaultDuration)
 		}
 
-		fmt.Printf("turning off zone %v\n", zone)
+		log.Printf("turning off zone %v\n", zone)
 
 		hwio.DigitalWrite(pin, hwio.LOW)
 
