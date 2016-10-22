@@ -1,10 +1,12 @@
 package main
 
 import (
-	"github.com/mlctrez/hwio"
 	log "github.com/Sirupsen/logrus"
+	"github.com/mlctrez/hwio"
+	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 )
@@ -48,12 +50,77 @@ func shutdown() {
 	hwio.CloseAll()
 }
 
+var sprinklerControlHTML = `
+<html>
+<head>
+</head>
+<body>
+<span style="font-size: 72px">
+Pin 0 <a href="/sprinkler/api?pin=0&cmd=on">ON</a>&nbsp;&nbsp;<a href="/sprinkler/api?pin=0">OFF</a><br>
+Pin 1 <a href="/sprinkler/api?pin=1&cmd=on">ON</a>&nbsp;&nbsp;<a href="/sprinkler/api?pin=1">OFF</a><br>
+Pin 2 <a href="/sprinkler/api?pin=2&cmd=on">ON</a>&nbsp;&nbsp;<a href="/sprinkler/api?pin=2">OFF</a><br>
+Pin 3 <a href="/sprinkler/api?pin=3&cmd=on">ON</a>&nbsp;&nbsp;<a href="/sprinkler/api?pin=3">OFF</a><br>
+Pin 4 <a href="/sprinkler/api?pin=4&cmd=on">ON</a>&nbsp;&nbsp;<a href="/sprinkler/api?pin=4">OFF</a><br>
+Pin 5 <a href="/sprinkler/api?pin=5&cmd=on">ON</a>&nbsp;&nbsp;<a href="/sprinkler/api?pin=5">OFF</a><br>
+</span>
+</body>
+`
+
+func runHttpServer() {
+
+	hwio.SetDriver(new(hwio.BeagleBoneBlackDriver))
+
+	pins, err := initializePins()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	http.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) {
+		rw.Write([]byte("go away"))
+	})
+
+	http.HandleFunc("/sprinkler", func(rw http.ResponseWriter, r *http.Request) {
+		rw.Write([]byte(sprinklerControlHTML))
+	})
+
+	http.HandleFunc("/sprinkler/api", func(rw http.ResponseWriter, r *http.Request) {
+
+		err := r.ParseForm()
+		if err != nil {
+			panic(err)
+		}
+
+		pin, err := strconv.Atoi(r.FormValue("pin"))
+		if err != nil {
+			return
+		}
+		if pin >= 0 && pin < len(pins) {
+			if r.FormValue("cmd") == "on" {
+				hwio.DigitalWrite(pins[pin], hwio.HIGH)
+			} else {
+				hwio.DigitalWrite(pins[pin], hwio.LOW)
+			}
+		}
+		rw.Write([]byte(sprinklerControlHTML))
+
+	})
+
+	http.ListenAndServe(":9090", nil)
+}
+
 func main() {
 
 	// for driver and zone cleanup
 	defer shutdown()
 
-	if len(os.Args)==2 {
+	if len(os.Args) == 2 {
+		if os.Args[1] == "http" {
+			runHttpServer()
+			return
+		}
+	}
+
+	if len(os.Args) == 2 {
 		if os.Args[1] == "stop" {
 			return
 		}
