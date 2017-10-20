@@ -1,42 +1,39 @@
 package main
 
 import (
-	log "github.com/Sirupsen/logrus"
-	"github.com/mlctrez/hwio"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
 	"syscall"
 	"time"
+
+	log "github.com/Sirupsen/logrus"
+	"github.com/mlctrez/hwio"
+	"flag"
 )
 
-func initializePins() (pins []hwio.Pin, err error) {
+var pinNames = []string{"P8.8", "P8.10", "P8.12", "P8.14", "P8.16", "P8.18"}
+var pins []hwio.Pin
+var sigChan = make(chan os.Signal, 1)
+
+func initializePins() error {
 
 	log.Println("initializePins")
-
-	pinNames := []string{"P8.8", "P8.10", "P8.12", "P8.14", "P8.16", "P8.18"}
 
 	pins = make([]hwio.Pin, len(pinNames))
 
 	for i, pinName := range pinNames {
 		myPin, err := hwio.GetPinWithMode(pinName, hwio.OUTPUT)
 		if err != nil {
-			return nil, err
+			return err
 		}
-
-		err = hwio.DigitalWrite(myPin, hwio.LOW)
-
-		if err != nil {
-			return nil, err
-		}
-
 		pins[i] = myPin
-
 	}
 
-	return pins, err
+	turnPinsOff()
 
+	return nil
 }
 
 func shutdown() {
@@ -44,10 +41,18 @@ func shutdown() {
 	log.Println("shutting down all zones")
 
 	// force all zones low to minimize water bill
-	initializePins()
+	turnPinsOff()
 
 	// close, per the hwio documentation
 	hwio.CloseAll()
+}
+
+func turnPinsOff() {
+	for _, p := range pins {
+		if err := hwio.DigitalWrite(p, hwio.LOW); err != nil {
+			log.Println(err)
+		}
+	}
 }
 
 var sprinklerControlHTML = `
@@ -66,17 +71,25 @@ Pin 5 <a href="/sprinkler/api?pin=5&cmd=on">ON</a>&nbsp;&nbsp;<a href="/sprinkle
 </body>
 `
 
-func runHttpServer() {
+func init() {
 
-	hwio.SetDriver(new(hwio.BeagleBoneBlackDriver))
+	// Force the beaglebone driver since MatchesHardwareConfig looks in the wrong location for my distribution.
+	// At some point a pull request should be submitted to address this.
+	hwio.SetDriver(hwio.NewBeagleboneBlackDTDriver())
 
-	pins, err := initializePins()
-	if err != nil {
+	if err := initializePins(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func runHttpServer() {
 
 	http.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) {
 		rw.Write([]byte("go away"))
+	})
+
+	http.HandleFunc("/stop", func(rw http.ResponseWriter, r *http.Request) {
+		sigChan <- os.Interrupt
 	})
 
 	http.HandleFunc("/sprinkler", func(rw http.ResponseWriter, r *http.Request) {
@@ -109,40 +122,28 @@ func runHttpServer() {
 }
 
 func main() {
-
 	// for driver and zone cleanup
 	defer shutdown()
 
-	if len(os.Args) == 2 {
-		if os.Args[1] == "http" {
-			runHttpServer()
-			return
-		}
-	}
-
-	if len(os.Args) == 2 {
-		if os.Args[1] == "stop" {
-			return
-		}
-	}
-
 	// handle signals and shut down the zones correctly
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
 	go func() {
-		<-c
+		<-sigChan
 		shutdown()
 		os.Exit(1)
 	}()
 
-	// Force the beaglebone driver since MatchesHardwareConfig looks in the wrong location for my distribution.
-	// At some point a pull request should be submitted to address this.
-	hwio.SetDriver(new(hwio.BeagleBoneBlackDriver))
+	httpOnly := flag.Bool("http", false, "if set, run only the http server")
+	flag.Parse()
 
-	pins, err := initializePins()
-	if err != nil {
-		log.Fatal(err)
+	if *httpOnly {
+		runHttpServer()
+		return
 	}
+
+	// normal mode with http server and program
+
+	go runHttpServer()
 
 	defaultDuration := 30 * time.Minute
 	zoneFiveDuration := 15 * time.Minute
