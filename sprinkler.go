@@ -1,16 +1,15 @@
 package main
 
 import (
+	"flag"
+	log "github.com/Sirupsen/logrus"
+	"github.com/mlctrez/hwio"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
 	"syscall"
 	"time"
-
-	log "github.com/Sirupsen/logrus"
-	"github.com/mlctrez/hwio"
-	"flag"
 )
 
 var pinNames = []string{"P8.8", "P8.10", "P8.12", "P8.14", "P8.16", "P8.18"}
