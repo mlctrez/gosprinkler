@@ -2,14 +2,17 @@ package main
 
 import (
 	"flag"
-	log "github.com/Sirupsen/logrus"
-	"github.com/mlctrez/hwio"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
+
+	log "github.com/Sirupsen/logrus"
+	"github.com/krolaw/dhcp4"
+	"github.com/mlctrez/hwio"
 )
 
 var pinNames = []string{"P8.8", "P8.10", "P8.12", "P8.14", "P8.16", "P8.18"}
@@ -120,6 +123,27 @@ func runHttpServer() {
 	http.ListenAndServe(":9090", nil)
 }
 
+func listenDashButton() {
+
+	err := dhcp4.ListenAndServe(&DhcpHandler{})
+	if err != nil {
+		log.Println(err)
+	}
+
+}
+
+type DhcpHandler struct{}
+
+func (mh *DhcpHandler) ServeDHCP(req dhcp4.Packet, msgType dhcp4.MessageType, options dhcp4.Options) dhcp4.Packet {
+	addr := req.CHAddr()
+	if addr != nil && "44:65:0d:4a:e2:b4" == strings.ToLower(addr.String()) {
+		sigChan <- os.Interrupt
+	}
+
+	// return nil to send no response
+	return nil
+}
+
 func main() {
 	// for driver and zone cleanup
 	defer shutdown()
@@ -135,12 +159,12 @@ func main() {
 	httpOnly := flag.Bool("http", false, "if set, run only the http server")
 	flag.Parse()
 
+	go listenDashButton()
+
 	if *httpOnly {
 		runHttpServer()
 		return
 	}
-
-	// normal mode with http server and program
 
 	go runHttpServer()
 
