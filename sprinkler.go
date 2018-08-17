@@ -3,59 +3,13 @@ package main
 import (
 	"flag"
 	"net/http"
-	"os"
-	"os/signal"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
-	"github.com/krolaw/dhcp4"
-	"github.com/mlctrez/hwio"
+	"github.com/mlctrez/gosprinkler/beagle"
+	"github.com/mlctrez/gosprinkler/dashbutton"
+	"github.com/mlctrez/gosprinkler/sighandler"
 )
-
-var pinNames = []string{"P8.8", "P8.10", "P8.12", "P8.14", "P8.16", "P8.18"}
-var pins []hwio.Pin
-var sigChan = make(chan os.Signal, 1)
-
-func initializePins() error {
-
-	log.Println("initializePins")
-
-	pins = make([]hwio.Pin, len(pinNames))
-
-	for i, pinName := range pinNames {
-		myPin, err := hwio.GetPinWithMode(pinName, hwio.OUTPUT)
-		if err != nil {
-			return err
-		}
-		pins[i] = myPin
-	}
-
-	turnPinsOff()
-
-	return nil
-}
-
-func shutdown() {
-
-	log.Println("shutting down all zones")
-
-	// force all zones low to minimize water bill
-	turnPinsOff()
-
-	// close, per the hwio documentation
-	hwio.CloseAll()
-}
-
-func turnPinsOff() {
-	for _, p := range pins {
-		if err := hwio.DigitalWrite(p, hwio.LOW); err != nil {
-			log.Println(err)
-		}
-	}
-}
 
 var sprinklerControlHTML = `
 <html>
@@ -73,25 +27,14 @@ Pin 5 <a href="/sprinkler/api?pin=5&cmd=on">ON</a>&nbsp;&nbsp;<a href="/sprinkle
 </body>
 `
 
-func init() {
-
-	// Force the beaglebone driver since MatchesHardwareConfig looks in the wrong location for my distribution.
-	// At some point a pull request should be submitted to address this.
-	hwio.SetDriver(hwio.NewBeagleboneBlackDTDriver())
-
-	if err := initializePins(); err != nil {
-		log.Fatal(err)
-	}
-}
-
-func runHttpServer() {
+func runHttpServer(api *beagle.Api, sig *sighandler.Api) {
 
 	http.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) {
 		rw.Write([]byte("go away"))
 	})
 
 	http.HandleFunc("/stop", func(rw http.ResponseWriter, r *http.Request) {
-		sigChan <- os.Interrupt
+		sig.Interrupt()
 	})
 
 	http.HandleFunc("/sprinkler", func(rw http.ResponseWriter, r *http.Request) {
@@ -105,88 +48,48 @@ func runHttpServer() {
 			panic(err)
 		}
 
-		pin, err := strconv.Atoi(r.FormValue("pin"))
-		if err != nil {
-			return
-		}
-		if pin >= 0 && pin < len(pins) {
-			if r.FormValue("cmd") == "on" {
-				hwio.DigitalWrite(pins[pin], hwio.HIGH)
-			} else {
-				hwio.DigitalWrite(pins[pin], hwio.LOW)
-			}
-		}
-		rw.Write([]byte(sprinklerControlHTML))
+		api.ChangePin(r.FormValue("pin"), r.FormValue("cmd"))
 
+		rw.Write([]byte(sprinklerControlHTML))
 	})
 
 	http.ListenAndServe(":9090", nil)
 }
 
-func listenDashButton() {
-
-	err := dhcp4.ListenAndServe(&DhcpHandler{})
-	if err != nil {
-		log.Println(err)
-	}
-
-}
-
-type DhcpHandler struct{}
-
-func (mh *DhcpHandler) ServeDHCP(req dhcp4.Packet, msgType dhcp4.MessageType, options dhcp4.Options) dhcp4.Packet {
-	addr := req.CHAddr()
-	if addr != nil && "44:65:0d:4a:e2:b4" == strings.ToLower(addr.String()) {
-		sigChan <- os.Interrupt
-	}
-
-	// return nil to send no response
-	return nil
-}
-
 func main() {
-	// for driver and zone cleanup
-	defer shutdown()
 
-	// handle signals and shut down the zones correctly
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
-	go func() {
-		<-sigChan
-		shutdown()
-		os.Exit(1)
-	}()
+	api := beagle.New()
+	sig := sighandler.New()
+	sig.RegisterHandler(api.Shutdown)
+
+	// for driver and zone cleanup on main exit
+	defer api.Shutdown()
 
 	httpOnly := flag.Bool("http", false, "if set, run only the http server")
 	flag.Parse()
 
-	go listenDashButton()
+	go dashbutton.New(sig.Interrupt)
 
 	if *httpOnly {
-		runHttpServer()
+		runHttpServer(api, sig)
 		return
 	}
-
-	go runHttpServer()
 
 	defaultDuration := 30 * time.Minute
 	zoneFiveDuration := 15 * time.Minute
 
-	for zone, pin := range pins {
+	for _, zone := range strings.Split("0,1,2,3,4,5", ",") {
 
-		log.Printf("turning on zone %v\n", zone)
-
-		hwio.DigitalWrite(pin, hwio.HIGH)
+		api.ChangePin(zone, "on")
 
 		switch zone {
-		case 5:
+		case "5":
 			time.Sleep(zoneFiveDuration)
 		default:
 			time.Sleep(defaultDuration)
 		}
 
-		log.Printf("turning off zone %v\n", zone)
-
-		hwio.DigitalWrite(pin, hwio.LOW)
+		api.ChangePin(zone, "off")
 
 		// pause between zones to allow the sprinkler heads to retract
 		time.Sleep(30 * time.Second)
